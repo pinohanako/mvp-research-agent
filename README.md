@@ -7,7 +7,7 @@
 Граф позволяет обрабатывать данные по последовательным шагам: например, анализ статьи -> поиск дополнительных фрагментов -> обновление суммаризации
 
 <p align="center">
-  <img src="https://github.com/pinohanako/mvp-research-agent/blob/main/agent/docs/Prototype.png" alt="Прототип агента" width="600"/>
+  <img src="https://github.com/pinohanako/mvp-research-agent/blob/main/agent/docs/Prototype.png" alt="Прототип агента" width="1000"/>
 </p>
 
 ---
