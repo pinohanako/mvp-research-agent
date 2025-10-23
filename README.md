@@ -26,7 +26,7 @@
 
 Важнейшие поля:
 
-- `messages` — список сообщений AnyMessage (HumanMessage, AIMessage, tool messages и т.д.). Хранит историю диалога
+- `messages` — список сообщений AnyMessage. Хранит историю диалога
 - `query` — текущая строка запроса пользователя
 - `intent` — распознанное текущее намерение: `"qa"` | `"search"` | `"analyze"`
 - `current_article` — ArticleState (`title`, `summary`, `authors`, `published`, `pdf_id`, `pdf_name`, `doi`).
@@ -118,4 +118,4 @@ TTL-сейвер следит за устаревшими записями в п
 
 ## Стек
 
-Langgraph | Langfuse | Pydantic | Qdrant | PostgreSQL (AsyncPostgresStore, AsyncPostgresSaver) | SpaCy | Streamlit
+`Langgraph` | `Langfuse` | `Pydantic` | `Qdrant` | `PostgreSQL (AsyncPostgresStore)` | `SpaCy` | `Streamlit`
