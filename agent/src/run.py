@@ -48,7 +48,7 @@ qdrant = QdrantClient(
 )
 
 @traced
-async def call_model(state: dict, runtime) -> dict:
+async def call_model(state: dict, runtime: Runtime[Context]) -> dict:
     logger.info(f"🦔 ENTER NODE: call_model")
     user_id = runtime.context.user_id
     model_str = runtime.context.model
@@ -395,7 +395,7 @@ async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 5):
 
 MAX_RESULTS_PER_QUERY = 5
 @traced
-async def arxiv_research(state: dict, runtime):
+async def arxiv_research(state: dict, runtime: Runtime[Context]):
     query = state.get("query", "")
     if not query:
         return state
@@ -433,7 +433,7 @@ async def arxiv_research(state: dict, runtime):
 
 
 @traced
-async def summarize_sources(state: dict, runtime):
+async def summarize_sources(state: dict, runtime: Runtime[Context]):
     raw_results = state.get("raw_results", [])
     if not raw_results:
         return state
@@ -453,7 +453,7 @@ async def summarize_sources(state: dict, runtime):
 
 
 @traced
-async def finalize_summary(state: dict, runtime):
+async def finalize_summary(state: dict, runtime: Runtime[Context]):
     summary_text = state.get("running_summary", "")
     unique_sources = list({d["url"] for d in state.get("raw_results", [])} | set(state.get("url_sources", [])))
 
