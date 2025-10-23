@@ -13,3 +13,8 @@ Makerfile
 langgraph.json
 pyproject.toml
 /agent/src/memory_agent/rag/service.py
+# Системные и временные файлы
+.DS_Store
+.langgraph_api/
+lg_app_local/
+
