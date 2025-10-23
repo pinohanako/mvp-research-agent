@@ -472,7 +472,8 @@ async def finalize_summary(state: dict, runtime: Runtime[Context]):
         response = client.chat.completions.create(
             model=f"accounts/fireworks/models/{runtime.context.model.split('/')[-1]}",
             messages=[
-                {"role": "system", "content": "Используй суммаризацию и исходный запрос для продолжения диалога, обязательно включи источники."},
+                {"role": "system", "content": "Используй суммаризацию и исходный запрос для продолжения диалога, "
+                                              "обязательно включи источники."},
                 {"role": "user", "content": model_context_prompt}
             ],
             max_tokens=10000,
@@ -548,7 +549,9 @@ async def run_agent(user_input: str, state: dict, session_id: str):
             graph_builder.add_edge("finalize_summary", END)
             graph_builder.add_edge("analyze_node", "call_model")
 
-            graph = graph_builder.compile(store=store, checkpointer=checkpointer, cache=InMemoryCache())
+            graph = graph_builder.compile(store=store, 
+                                          checkpointer=checkpointer, 
+                                          cache=InMemoryCache())
             graph.name = "MVPAgent"
 
             initial_state = {
