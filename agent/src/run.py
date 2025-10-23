@@ -378,7 +378,7 @@ async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 5):
         response = client.chat.completions.create(
             model=f"accounts/fireworks/models/{runtime.context.model.split('/')[-1]}",
             messages=[
-                {"role": "system", "content": "Ты научный ассистент. Используй предоставленные данные о статье и контекст запроса."},
+                {"role": "system", "content": "Используй предоставленные данные о статье и контекст запроса для ответа."},
                 {"role": "user", "content": prompt_text}
             ],
             max_tokens=1500,
