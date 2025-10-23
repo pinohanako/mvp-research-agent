@@ -10,8 +10,8 @@ class Context:
     model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
         default="fireworks/gpt-oss-120b",
         metadata={
-            "description": "The name of the language model to use for the agent. "
-            "Should be in the form: provider/model-name."
+            "description": "Название LLM, которую будет использовать агент "
+            "Должно быть вида: provider/model-name."
         },
     )
 

@@ -49,7 +49,7 @@ qdrant = QdrantClient(
 
 @traced
 async def call_model(state: dict, runtime) -> dict:
-    logger.info(f"🚀 ENTER NODE: call_model")
+    logger.info(f"🦔 ENTER NODE: call_model")
     user_id = runtime.context.user_id
     model_str = runtime.context.model
     system_prompt_template = runtime.context.system_prompt
@@ -260,7 +260,7 @@ async def call_model(state: dict, runtime) -> dict:
     return state
 
 async def store_memory(state: dict, runtime: Runtime[Context]):
-    logger.info("🚀 ENTER NODE: store_memory")
+    logger.info("🦔 ENTER NODE: store_memory")
     if not state.get("messages"):
         return state
 
@@ -283,7 +283,7 @@ async def store_memory(state: dict, runtime: Runtime[Context]):
     for tc, mem in zip(tool_calls, saved):
         state["messages"].append(HumanMessage(content=mem, role="tool"))
 
-    logger.info(f"🧠 store_memory detected intent={state.get('intent')}")
+    logger.info(f"🦔 store_memory detected intent={state.get('intent')}")
     return state
 
 async def generate_article_info(first_page_text: str, runtime: Runtime[Context]) -> ArticleInfo:
@@ -342,7 +342,6 @@ async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 5):
     # 2. Поиск топ-N релевантных чанков в Qdrant
     results = qdrant.query_points(
         collection_name=QDRANT_COLLECTION,
-        vector_name="embedding",
         query=query_vector,
         query_filter=models.Filter(
             must=[models.FieldCondition(
