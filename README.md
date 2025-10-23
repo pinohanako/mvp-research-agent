@@ -6,7 +6,9 @@
 
 Граф позволяет обрабатывать данные по последовательным шагам: например, анализ статьи -> поиск дополнительных фрагментов -> обновление суммаризации
 
-![Схема прототипа](agent/docs/prototype.jpg)
+<p align="center">
+  <img src="https://github.com/pinohanako/mvp-research-agent/blob/main/agent/docs/Prototype.png" alt="Прототип агента" width="600"/>
+</p>
 
 ---
 
