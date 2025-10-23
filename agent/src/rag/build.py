@@ -1,5 +1,5 @@
 from .utils import CustomChunker, get_embeddings
-from agent.src.memory_agent.utils import logger
+from agent.src.utils import logger
 
 import os
 import uuid

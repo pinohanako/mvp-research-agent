@@ -3,16 +3,16 @@ import traceback
 import asyncio
 import uuid
 from pathlib import Path
-from agent.src.memory_agent.context import Context
-from agent.src.memory_agent.run import run_agent
-from agent.src.memory_agent.rag import build              # process_pdf(pdf_path, pdf_name, pdf_id)
-from agent.src.memory_agent.context import Context
-from agent.src.memory_agent.utils import logger
+from agent.src.context import Context
+from agent.src.run import run_agent
+from agent.src.rag import build             # process_pdf(pdf_path, pdf_name, pdf_id)
+from agent.src.context import Context
+from agent.src.utils import logger
 from langchain.schema import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.src.memory_agent.utils import extract_first_page_text
-from agent.src.memory_agent.run import generate_article_info
+from agent.src.utils import extract_first_page_text
+from agent.src.run import generate_article_info
 
 st.set_page_config(page_title="Research Assistant", layout="wide")
 st.title("Research Assistant")
@@ -64,7 +64,6 @@ if uploaded_file is not None and all(f['name'] != uploaded_file.name for f in st
         }
         async def extract_and_generate(article_state):
                 first_page_text = extract_first_page_text(article_state["pdf_url"])
-                #runtime_instance = Runtime(context=Context(user_id=st.session_state.session_id, model="название_модели"))
                 article_info = await generate_article_info(first_page_text, runtime_instance)
                 return article_info
         try: 

@@ -37,16 +37,8 @@ class CustomChunker:
             chunk_overlap=self.chunk_overlap,
             separators=["\n\n", "\n", " ", ""]
         )
-        self.END_MARKERS = [
-            "References", "Список использованной литературы",
-            "Литература", "Bibliography"
-        ]
 
     def normalize_text(self, text: str) -> str:
-        """
-        Минимальная нормализация: убираем неразрывные пробелы и дублирующиеся пробелы,
-        но сохраняем переносы и дефисы.
-        """
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r'\s{2,}', ' ', text)
         return text.strip()
@@ -67,24 +59,17 @@ class CustomChunker:
 
         chunks = []
         buffer = ""
-        buffer_start_pos = 0  # для отслеживания позиции в all_text
+        buffer_start_pos = 0
 
         for i, sentence in enumerate(sentences):
-            # стоп-маркеры — конец документа
-            if any(sentence.startswith(marker) for marker in self.END_MARKERS):
-                break
-
             if buffer:
                 buffer += " " + sentence
             else:
                 buffer = sentence
                 buffer_start_pos = all_text.find(sentence, buffer_start_pos)
 
-            # если буфер достиг минимальной длины или конец текста — режем
             if len(buffer) >= self.min_chunk_length or i == len(sentences) - 1:
-                # делим через RecursiveCharacterTextSplitter
                 for chunk_text in self.splitter.split_text(buffer):
-                    # определяем страницу по позиции символа
                     char_pos = all_text.find(chunk_text, buffer_start_pos)
                     page_number = self._char_to_page(char_pos, page_map)
                     chunks.append({
@@ -103,15 +88,11 @@ class CustomChunker:
         return page_map[-1][1]
 
     def split_text(self, text: str):
-        """
-        Универсальный метод: если text — это путь к PDF, парсим PDF.
-        Иначе просто режем обычный текст.
-        """
-        if os.path.exists(text) and text.endswith(".pdf"):
+        if os.path.exists(text):
             return self._split_pdf(text)
         else:
             text = self.normalize_text(text)
-            return [{"chunk_text": chunk, "page_number": None, "pdf_file_name": None}
-                    for chunk in self.splitter.split_text(text)]
-
-
+            return [
+                {"chunk_text": chunk, "page_number": None, "pdf_file_name": None}
+                for chunk in self.splitter.split_text(text)
+            ]

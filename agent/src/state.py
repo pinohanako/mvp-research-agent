@@ -1,15 +1,15 @@
 from __future__ import annotations
 from operator import add
 
+from typing import Optional, List
 from dataclasses import dataclass, field
 
-from langchain_core.messages import AnyMessage
-from langgraph.graph import add_messages
 from typing_extensions import Annotated
 from typing_extensions import TypedDict
-from typing import Optional, List, Dict
+from langgraph.graph import add_messages
+from langchain_core.messages import AnyMessage
 
-# Долговременная память — подтвержденные статьи, загруженные пользователем
+# Cтатьи, загруженные пользователем
 class ArticleState(TypedDict):
     title: Optional[str]
     summary: Optional[str]        # аннотация
@@ -20,7 +20,7 @@ class ArticleState(TypedDict):
     pdf_name: Optional[str]
     doi: Optional[str]
 
-# Контекст пользователя — текущий запрос, интент, выбранная статья
+# Контекст пользователя — текущий запрос, интент, статья
 class PrivateState(TypedDict):
     query: Optional[str]
     intent: Optional[str]
@@ -28,24 +28,23 @@ class PrivateState(TypedDict):
 
 # Временная исследовательская память — результаты поиска
 class SummaryState(TypedDict):
-    raw_results: List[str]
-    """Тексты из найденных статей"""
-
+    # Тексты из найденных статей
+    raw_results: List[str] 
+    
+    # URL источников
     url_sources: List[str]
-    """Ссылки на источники (URL)"""
-
+    
+    # Количество итераций сбора данных
     research_loop_count: int
-    """Количество итераций сбора данных"""
-
+    
+    # Текущая агрегированная суммаризация
     running_summary: Optional[str]
-    """Текущая агрегированная суммаризация"""
 
 class OverallState(PrivateState, ArticleState, SummaryState):
     pass
 
 @dataclass(kw_only=True)
 class State(OverallState):
-    # История диалога
     messages: Annotated[List[AnyMessage], add_messages] = field(default_factory=list)
 
     # Контекст текущего взаимодействия

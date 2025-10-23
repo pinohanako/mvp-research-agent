@@ -1,5 +1,5 @@
-from typing import List, Optional, Union, Annotated, Literal, Callable
-from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Union, Literal
+from pydantic import BaseModel, Field
 
 SYSTEM_PROMPT = """Ты научный ассистент. 
 Ты адаптируешь свой ответ в зависимости от вопроса пользователя — иногда даешь быстрый ответ, а иногда размышляешь, 

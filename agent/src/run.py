@@ -3,8 +3,8 @@ from .context import Context
 from .prompts import Intent, Filter, ArticleInfo
 from .tracing import traced
 from .utils import logger
-from agent.src.memory_agent import tools
-from agent.src.memory_agent.rag.utils import get_embeddings
+from agent.src import tools
+from agent.src.rag.utils import get_embeddings
 
 from openai import OpenAI
 from langchain.schema import HumanMessage, AIMessage
@@ -212,7 +212,6 @@ async def call_model(state: dict, runtime) -> dict:
         current_article = state.get("current_article")
 
         if not current_article:
-            logger.warning("intent=analyze, но current_article отсутствует → fallback в qa")
             state["intent"] = "qa"
             reply_content = (
                 "Чтобы провести анализ, сначала нужно загрузить или выбрать статью."
@@ -490,7 +489,6 @@ async def finalize_summary(state: dict, runtime):
     state["running_summary"] = None
     return state
 
-
 def route_message(state: dict):
     intent = state.get("intent")
     if intent == "search":
@@ -499,7 +497,6 @@ def route_message(state: dict):
         return "analyze_node"
     else:
         return END
-
 
 def route_research(state: dict, max_loops: int = 2):
     if state.get("research_loop_count", 0) < max_loops:

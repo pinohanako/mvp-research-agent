@@ -19,7 +19,7 @@ def init_collection():
     """
     Создание коллекции в Qdrant с HNSW индексом для векторов
     pdf_name и page_number будут храниться вместе с точками, но индексироваться не будут
-    Из корня проекта запустить: python3 ./agent/src/memory_agent/rag/init_db.py
+    Из корня проекта запустить: python3 ./agent/src/rag/init_db.py
     """
     if qdrant.collection_exists(collection_name=COLLECTION_NAME):
         logger.info(f"Коллекция '{COLLECTION_NAME}' уже существует. Удаляем и создаём заново...")
