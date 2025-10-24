@@ -119,5 +119,4 @@ TTL-сейвер следит за устаревшими записями в п
 ---
 
 ## Стек
-
 `Langgraph` | `Langfuse` | `Pydantic` | `Qdrant` | `PostgreSQL (AsyncPostgresStore)` | `SpaCy` | `Streamlit`
