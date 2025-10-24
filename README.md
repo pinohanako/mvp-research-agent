@@ -5,7 +5,7 @@
 Ключевой компонент — **граф состояний**, который управляет обработкой пользовательских запросов
 
 <p align="center">
-  <img src="https://github.com/pinohanako/mvp-research-agent/blob/main/agent/docs/GraphLangsmith.png" alt="Прототип агента" width="1000"/>
+  <img src="https://github.com/pinohanako/mvp-research-agent/blob/main/agent/docs/GraphLangsmith.png" alt="Прототип агента" width="700"/>
 </p>
 
 ---
