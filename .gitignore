@@ -12,7 +12,6 @@ logs/
 Makerfile
 langgraph.json
 pyproject.toml
-/agent/src/rag/service.py
 
 .DS_Store
 .langgraph_api/
