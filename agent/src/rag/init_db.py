@@ -2,13 +2,13 @@ import os
 import logging
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PayloadSchemaType
+from qdrant_client.models import VectorParams, Distance
 
 load_dotenv()
-COLLECTION_NAME = "pdf_2"
+COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-DIMENSIONS = int(os.getenv("VECTOR_DIMENSIONS", 1024))
+DIMENSIONS = int(os.getenv("VECTOR_DIMENSION"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,21 +25,15 @@ def init_collection():
         logger.info(f"Коллекция '{COLLECTION_NAME}' уже существует. Удаляем и создаём заново...")
         qdrant.delete_collection(collection_name=COLLECTION_NAME)
 
-    qdrant.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config={
-            "embedding": VectorParams(
-                size=DIMENSIONS,
-                distance=Distance.COSINE,
-            ),
-        },
+    qdrant.create_collection(collection_name=COLLECTION_NAME,
+                             vectors_config=VectorParams(size=DIMENSIONS, distance=Distance.COSINE),
         shard_number=1,
         replication_factor=1,
         write_consistency_factor=1,
         on_disk_payload=False,
     )
 
-    logger.info(f"Коллекция '{COLLECTION_NAME}' создана с HNSW индексом для векторов.")
+    logger.info(f"Коллекция '{COLLECTION_NAME}' создана с HNSW индексом для векторов")
 
     qdrant.create_payload_index(
         collection_name=COLLECTION_NAME,
