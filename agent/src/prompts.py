@@ -15,7 +15,6 @@ SYSTEM_PROMPT = """Ты научный ассистент.
 {user_info}
 
 Системное время: {time}"""
-
 class Intent(BaseModel):
     intent: Literal["search", "qa", "analyze"] = Field(
         description=(
@@ -26,7 +25,6 @@ class Intent(BaseModel):
             "analyze — намерение что-либо узнать о загруженных статьях"
         )
     )
-
 class Filter(BaseModel):
     title: Union[str, None] = Field(
         description="Название статьи - если указана",
@@ -40,10 +38,10 @@ class Filter(BaseModel):
         description="Строка DOI - если указано",
         default=None
     )
-
 class ArticleInfo(BaseModel):
     title: Union[str, None] = Field(..., description="Название статьи")
     summary: Union[str, None] = Field(None, description="Аннотация статьи")
     authors: List[str] = Field(default_factory=list, description="Список авторов")
     published: Union[str, None] = Field(None, description="Дата публикации")
     doi: Union[str, None] = Field(None, description="DOI статьи")
+    key_words: Union[str, None] = Field(None, description="Ключевые слова")

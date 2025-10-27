@@ -15,10 +15,10 @@ class ArticleState(TypedDict):
     summary: Optional[str]        # аннотация
     authors: Optional[List[str]]
     published: Optional[str]
-    pdf_url: Optional[str]
     pdf_id: Optional[str]
     pdf_name: Optional[str]
     doi: Optional[str]
+    key_words: Optional[str]
 
 # Контекст пользователя — текущий запрос, интент, статья
 class PrivateState(TypedDict):
