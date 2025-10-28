@@ -518,8 +518,9 @@ async def run_agent(user_input: str, state: dict, session_id: str):
                 lambda s: route_research(s),
                 ["arxiv_research", "finalize_summary"]
             )
+            graph_builder.add_edge("analyze_node", "store_memory") 
             graph_builder.add_edge("finalize_summary", END)
-            graph_builder.add_edge("analyze_node", END)
+            graph_builder.add_edge("store_memory", END)
 
             graph = graph_builder.compile(
                 store=store,
