@@ -15,7 +15,7 @@
 При каждом запросе LLM классифицирует намерение на три категории:
 
 - `search` — поиск статей на arXiv
-- `analyze` — работа с уже загруженными статьями (анализ, суммаризация)
+- `analyze` — работа с уже загруженными статьями (в случае, если загружен pdf)
 - `qa` — прямой ответ на вопрос или свободный текст
 
 Для валидации JSON-ответа используется Pydantic-парсер и StructuredOutput
@@ -29,11 +29,12 @@
 - `messages` — список сообщений AnyMessage. Хранит историю диалога
 - `query` — текущая строка запроса пользователя
 - `intent` — распознанное текущее намерение: `"qa"` | `"search"` | `"analyze"`
-- `current_article` — ArticleState (`title`, `summary`, `authors`, `published`, `pdf_id`, `pdf_name`, `doi`).
+- `current_article` — ArticleState (`title`, `summary`, `authors`, `published`, `pdf_id`, `pdf_name`, `doi`, `key_words`).
 - `raw_results` — временный контейнер для результатов поиска (тексты)
 - `url_sources` — набор URL найденных источников
 - `research_loop_count` — счётчик итераций поиска/агрегации
 - `running_summary` — агрегированная промежуточная суммаризация
+- `retrieved_chunks` — текущие извлеченные из pdf фрагменты контекста
 
 ---
 
@@ -41,7 +42,7 @@
 
 - `call_model` — определяет **намерение пользователя (intent)** и формирует данные для передачи
 - `store_memory` — сохраняет ключевые сообщения в долговременную память
-- `analyze_node` — анализирует выбранную статью, используя релевантные фрагменты из Qdrant
+- `analyze_node` — анализирует выбранную статью, используя релевантные фрагменты из Pinecone
 - `arxiv_research` — выполняет поиск статей на arXiv по запросу
 - `summarize_sources` — агрегирует найденные статьи в промежуточную суммаризацию
 - `finalize_summary` — создает финальную суммаризацию с источниками
@@ -54,7 +55,7 @@
 
 ### Долговременная
 
-Сохраняет **загруженные статьи** и ключевые факты в векторном хранилище Qdrant
+Сохраняет **загруженные статьи** и ключевые факты в векторном хранилище Pinecone
 
 Хранится в **PostgreSQL** с TTL, интегрирована с StateGraph через `AsyncPostgresStore` и `AsyncPostgresSaver`
 
@@ -95,4 +96,4 @@ TTL-сейвер следит за устаревшими записями в п
 ---
 
 ## Стек
-`Langgraph` | `Langfuse` | `Pydantic` | `Qdrant` | `PostgreSQL (AsyncPostgresStore)` | `SpaCy` | `Streamlit`
+`Langgraph` | `Langfuse` | `Pydantic` | `Pinecone` | `PostgreSQL (AsyncPostgresStore)` | `SpaCy` | `Streamlit`
