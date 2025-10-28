@@ -1,46 +1,45 @@
 import os
+import re
 import logging
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance
+from pinecone.grpc import PineconeGRPC as Pinecone
+from pinecone import ServerlessSpec
 
 load_dotenv()
-COLLECTION_NAME = os.getenv("COLLECTION_NAME")
-QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+INDEX_NAME = re.sub(r'[^a-z0-9-]', '-', os.getenv("COLLECTION_NAME").lower()).strip('-')
 DIMENSIONS = int(os.getenv("VECTOR_DIMENSION"))
+
+CLOUD = os.getenv("PINECONE_CLOUD", "aws")
+REGION = os.getenv("PINECONE_REGION", "us-east-1")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-qdrant = QdrantClient(url=QDRANT_ENDPOINT, api_key=QDRANT_API_KEY)
-
-def init_collection():
+def init_index():
     """
-    Создание коллекции в Qdrant с HNSW индексом для векторов
-    pdf_name и page_number будут храниться вместе с точками, но индексироваться не будут
-    Из корня проекта запустить: python3 ./agent/src/rag/init_db.py
+    Создаем Pinecone Index, если он не существует
+    Из корня проекта запустить:
+        python3 ./agent/src/rag/init_db.py
     """
-    if qdrant.collection_exists(collection_name=COLLECTION_NAME):
-        logger.info(f"Коллекция '{COLLECTION_NAME}' уже существует. Удаляем и создаём заново...")
-        qdrant.delete_collection(collection_name=COLLECTION_NAME)
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    existing_indexes = [idx["name"] for idx in pc.list_indexes().indexes]
 
-    qdrant.create_collection(collection_name=COLLECTION_NAME,
-                             vectors_config=VectorParams(size=DIMENSIONS, distance=Distance.COSINE),
-        shard_number=1,
-        replication_factor=1,
-        write_consistency_factor=1,
-        on_disk_payload=False,
+    if INDEX_NAME in existing_indexes:
+        logger.info(f"Индекс '{INDEX_NAME}' уже существует, пропускаем создание.")
+        return
+
+    logger.info(f"Создаём новый индекс: '{INDEX_NAME}' (dim={DIMENSIONS})")
+
+    pc.create_index(
+        name=INDEX_NAME,
+        dimension=DIMENSIONS,
+        metric="cosine",
+        spec=ServerlessSpec(cloud=CLOUD, region=REGION),
     )
 
-    logger.info(f"Коллекция '{COLLECTION_NAME}' создана с HNSW индексом для векторов")
-
-    qdrant.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="pdf_id",
-        field_schema="keyword"
-    )
-    logger.info("Payload index создан для pdf_id.")
+    logger.info(f"-- Индекс '{INDEX_NAME}' успешно создан.")
 
 if __name__ == "__main__":
-    init_collection()
+    init_index()

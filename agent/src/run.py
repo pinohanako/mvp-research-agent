@@ -1,15 +1,15 @@
-from .state import State
-from .context import Context
-from .prompts import Intent, Filter, ArticleInfo
-from .tracing import traced
-from .utils import logger
+from agent.src.state import State
+from agent.src.context import Context
+from agent.src.prompts import Intent, Filter, ArticleInfo, PdfContextDecision
+from agent.src.tracing import traced
 from agent.src import tools
-from agent.src.rag.utils import get_embeddings
+from agent.src.rag import service
+from agent.src.utils import logger
 
 from openai import OpenAI
-from langchain.schema import HumanMessage, AIMessage
-from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
 
 from langgraph.graph import END, StateGraph
 from langgraph.runtime import Runtime
@@ -18,15 +18,13 @@ from langgraph.store.base import BaseStore
 from langgraph.store.postgres.aio import AsyncPostgresStore, TTLConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from qdrant_client import QdrantClient, models
-
 import os
 import asyncio
+import aiohttp
+import feedparser
 from datetime import datetime
 from typing import cast
 from collections import defaultdict
-import aiohttp
-import feedparser
 from dotenv import load_dotenv
 
 DB_URI = f"postgresql://{os.environ['POSTGRES_USER']}:" \
@@ -36,28 +34,19 @@ DB_URI = f"postgresql://{os.environ['POSTGRES_USER']}:" \
          f"{os.environ['POSTGRES_DB']}?sslmode=disable&connect_timeout=10"
 
 load_dotenv()
-QDRANT_ENDPOINT = os.environ.get("QDRANT_ENDPOINT")
-QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION")
-JINA_API_KEY = os.environ.get("JINA_API_KEY")
-JINA_URL = "https://api.jina.ai/v1/embeddings"
-
-qdrant = QdrantClient(
-    url=QDRANT_ENDPOINT,
-    api_key=QDRANT_API_KEY
-)
 
 @traced
 async def call_model(state: dict, runtime: Runtime[Context]) -> dict:
-    logger.info(f"🦔 ENTER NODE: call_model")
+    logger.info("🦔 ENTER NODE: call_model")
+
     user_id = runtime.context.user_id
     model_str = runtime.context.model
     system_prompt_template = runtime.context.system_prompt
-    state.setdefault("intent", "qa")
-
     model_name = f"accounts/fireworks/models/{model_str.split('/')[-1]}"
 
-    # последние 3 сообщения для контекста памяти
+    state.setdefault("intent", "qa")
+    last_user_message = state["messages"][-1].content if state.get("messages") else ""
+
     memories = await cast(BaseStore, runtime.store).asearch(
         ("memories", user_id),
         query=str([m.content for m in state["messages"][-3:]]),
@@ -90,94 +79,102 @@ async def call_model(state: dict, runtime: Runtime[Context]) -> dict:
             "content": getattr(msg, "content", str(msg))
         })
 
-    last_user_message = state["messages"][-1].content if state["messages"] else ""
+    pdf_id = state.get("current_article", {}).get("pdf_id")
+    if pdf_id:
+        logger.info(f"PDF ID найден в state: {pdf_id}, проверяем, актуален ли он для продолжения диалога")
 
-    # intent parser + prompt
+        parser = PydanticOutputParser(pydantic_object=PdfContextDecision)
+        title = state.get("title")
+        pdf_context_prompt = PromptTemplate(
+            template=(
+                "Определи, продолжает ли пользователь обсуждать PDF '{title}'"
+                "Ответь строго в JSON формате.\n\n"
+                "Требуемая схема:\n{format_instructions}\n\n"
+                "Сообщение пользователя:\n{query}"
+            ),
+            input_variables=["query", "title"],
+            partial_variables={"format_instructions": parser.get_format_instructions()}
+        )
+
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{
+                    "role": "user", 
+                    "content": pdf_context_prompt.format(query=last_user_message, title=title)}],
+                max_tokens=500,
+                temperature=0.0,
+            )
+            parsed = parser.parse(response.choices[0].message.content)
+            raw_value = getattr(parsed, "continue_pdf", False)
+            if isinstance(raw_value, bool):
+                continue_pdf = raw_value
+            else:
+                continue_pdf = str(raw_value).strip().lower() == "true"
+        except Exception as e:
+            logger.warning(f"!!! Ошибка при StructuredOutput проверки PDF-контекста: {e}")
+            continue_pdf = False
+
+        if continue_pdf:
+            logger.info("🦔 Модель подтвердила, что пользователь продолжает обсуждать PDF.")
+            state["intent"] = "analyze"
+            state["query"] = last_user_message
+
+            try:
+                retriever = service.PdfRetrieval()
+                chunks = await retriever.retrieve(last_user_message, pdf_id, top_k=8)
+                state["retrieved_chunks"] = chunks or []
+                logger.info(f"🦔 Извлечено {len(chunks)} чанков из Qdrant для pdf_id={pdf_id}")
+            except Exception as e:
+                logger.exception(f"Ошибка при поиске чанков: {e}")
+                state["retrieved_chunks"] = []
+
+            return state
+
+        else:
+            logger.info("🦔 Модель решила, что пользователь сменил тему — очищаем PDF контекст")
+            state["pdf_id"] = None
+            state["retrieved_chunks"] = []
+
+    # --- Классификация намерения (qa или search)
     parser = PydanticOutputParser(pydantic_object=Intent)
     intent_prompt_template = PromptTemplate(
         template=(
-            "Классифицируй намерение пользователя на одну из категорий: qa, search, analyze.\n"
-            "если запрос явно относится к поиску статей — \"search\",\n"
-            "если это запрос на анализ или суммаризацию — \"analyze\".\n"
-            "если это вопрос, на который нужен прямой ответ — \"qa\",\n"
-            "Если запрос не подходит ни под одну категорию (например, приветствие, благодарность, простой диалог) — \n"
-            "тоже возвращай \"qa\" как общий intent для свободного текста.\n\n"
-            "Верни ТОЛЬКО один JSON-объект, соответствующий схеме ниже, без комментариев.\n"
-            "Категории intent: search, qa, analyze\n\n"
-            "Схема для JSON-ответа:\n"
-            "{format_instructions}\n\n"
-            "Запрос пользователя:\n"
-            "{query}"
+            "Классифицируй намерение пользователя на одну из категорий: qa, search.\n"
+            "Если запрос явно относится к поиску статей — 'search'.\n"
+            "Если это вопрос, свободный текст, комментарий, приветствие — 'qa'.\n\n"
+            "Верни ТОЛЬКО JSON, соответствующий схеме:\n{format_instructions}\n\n"
+            "Запрос пользователя:\n{query}"
         ),
         input_variables=["query"],
         partial_variables={"format_instructions": parser.get_format_instructions()}
     )
 
-    raw_content = None
-    intent_str = "qa"
-    intent_attempts = 3
-    for attempt in range(intent_attempts):
-        try:
-            intent_response = client.chat.completions.create(
-                model=model_name,
-                messages=messages_payload + [{"role": "user", "content": intent_prompt_template.format(query=last_user_message)}],
-                max_tokens=100,
-                temperature=0.0,
-            )
-
-            try:
-                logger.debug(f"Intent response dump (attempt {attempt}): {repr(intent_response)}")
-            except Exception:
-                logger.debug("Intent response received (cannot repr)")
-
-            choice = None
-            if getattr(intent_response, "choices", None):
-                choice = intent_response.choices[0]
-            if choice is not None:
-                raw_content = None
-                if hasattr(choice, "message") and getattr(choice.message, "content", None):
-                    raw_content = choice.message.content
-                elif getattr(choice, "text", None):
-                    raw_content = choice.text
-                else:
-                    raw_content = str(choice)
-            else:
-                raw_content = None
-
-            if not raw_content:
-                raise ValueError("Empty intent_response content")
-
-            try:
-                intent_parsed = parser.parse(raw_content)
-                intent_str = intent_parsed.intent or "qa"
-                break
-            except Exception:
-                logger.warning("Intent parser failed; raw_content=%s", raw_content)
-                raw_content = None
-        except Exception as e:
-            logger.exception("Intent detection API error (attempt %d): %s", attempt, e)
-            raw_content = None
-
-    if not raw_content:
-        logger.error("Intent detection failed after retries; falling back to 'qa'")
+    try:
+        intent_response = client.chat.completions.create(
+            model=model_name,
+            messages=messages_payload + [
+                {"role": "user", "content": intent_prompt_template.format(query=last_user_message)}
+            ],
+            max_tokens=50,
+            temperature=0.0,
+        )
+        intent_parsed = parser.parse(intent_response.choices[0].message.content)
+        intent_str = intent_parsed.intent
+    except Exception as e:
+        logger.warning(f"!!! Ошибка определения intent: {e}")
         intent_str = "qa"
-        reply_content = "Произошла ошибка при обработке API запроса."
-        state["intent"] = intent_str
-        state["messages"].append(AIMessage(content=reply_content))
-        return state
 
     state["intent"] = intent_str
-
-    reply_content = None
+    state["query"] = last_user_message
+    logger.info(f"🧩 Intent определён: {intent_str}")
 
     if intent_str == "search":
-        state["query"] = last_user_message
         parser = PydanticOutputParser(pydantic_object=Filter)
         prompt_text = (
             f"Составь JSON по запросу:\n{last_user_message}\n\n"
             f"Строго придерживайся схемы:\n{parser.get_format_instructions()}"
         )
-
         try:
             llm_response = client.chat.completions.create(
                 model=model_name,
@@ -199,49 +196,24 @@ async def call_model(state: dict, runtime: Runtime[Context]) -> dict:
                 "authors": state["authors"],
                 "doi": state["doi"],
             }
-            reply_content = None
         except Exception:
-            logger.exception("Ошибка при генерации фильтров для поиска")
-            state["title"] = None
-            state["authors"] = []
-            state["doi"] = None
+            logger.exception("Ошибка при генерации фильтров поиска")
             state["current_article"] = None
-            reply_content = "Ошибка при генерации фильтров для поиска"
 
-    elif intent_str == "analyze":
-        current_article = state.get("current_article")
+        return state
 
-        if not current_article:
-            state["intent"] = "qa"
-            reply_content = (
-                "Чтобы провести анализ, сначала нужно загрузить или выбрать статью."
-            )
-        else:
-            for key in ("pdf_id", "pdf_url", "pdf_name"):
-                if key in current_article and current_article[key] is not None:
-                    state[key] = current_article[key]
-
-            state["intent"] = "analyze"
-            state["query"] = last_user_message
-
-            logger.info(
-                f"intent=analyze: переданы базовые ключи"
-                f"{[k for k in ('pdf_id', 'pdf_url', 'pdf_name') if current_article.get(k)]}"
-            )
-            reply_content = None
-
-    else:
-        try:
-            qa_response = client.chat.completions.create(
-                model=model_name,
-                messages=messages_payload,
-                max_tokens=4999,
-                temperature=0.5,
-            )
-            reply_content = qa_response.choices[0].message.content
-        except Exception:
-            logger.exception("QA call failed")
-            reply_content = "Произошла ошибка при обработке API запроса."
+    try:
+        qa_response = client.chat.completions.create(
+            model=model_name,
+            messages=messages_payload,
+            max_tokens=4000,
+            temperature=0.5,
+        )
+        reply_content = qa_response.choices[0].message.content
+        state["messages"].append(AIMessage(content=reply_content))
+    except Exception as e:
+        logger.exception("QA call failed: %s", e)
+        state["messages"].append(AIMessage(content="Произошла ошибка при обработке запроса."))
 
     try:
         await tools.upsert_memory(
@@ -253,9 +225,7 @@ async def call_model(state: dict, runtime: Runtime[Context]) -> dict:
     except Exception:
         logger.exception("upsert_memory failed")
 
-    if reply_content:
-        state["messages"].append(AIMessage(content=reply_content))
-    logger.info(f"🧩 Updated state.intent={state['intent']}")
+    logger.info(f"call_model завершён: intent={state['intent']}")
     return state
 
 async def store_memory(state: dict, runtime: Runtime[Context]):
@@ -307,7 +277,7 @@ async def generate_article_info(first_page_text: str, runtime: Runtime[Context])
     response = client.chat.completions.create(
         model=model_name,
         messages=[
-            {"role": "system", "content": "Используй только предоставленный текст для извлечения метаданных."},
+            {"role": "system", "content": "Используй только предоставленный контекст для извлечения метаданных."},
             {"role": "user", "content": prompt_template.format(first_page_text=first_page_text)}
         ],
         max_tokens=1000,
@@ -319,77 +289,75 @@ async def generate_article_info(first_page_text: str, runtime: Runtime[Context])
     return article_info
 
 @traced
-async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 5):
-    """
-    Анализирует текущую статью:
-    - получает embedding запроса через Jina
-    - ищет топ-N релевантных чанков в Qdrant
-    - конструирует единый промпт и вызывает LLM
-    """
-    current_article = state.get("current_article")
-    if not current_article:
-        logger.warning("analyze_node: current_article отсутствует, fallback в qa")
-        state["intent"] = "qa"
+async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 8):
+    pdf_id = state.get("pdf_id")
+    query_text = state.get("query", "")
+    chunks_data = state.get("retrieved_chunks", [])
+    current_article = state.get("current_article", {})
+
+    if not chunks_data:
         state["messages"].append(
-            AIMessage(content="Чтобы провести анализ, сначала нужно загрузить или выбрать статью.")
+            AIMessage(
+                content=(
+                    "Не удалось найти релевантные фрагменты для анализа. "
+                    "Попробуй переформулировать вопрос или уточнить контекст."
+                )
+            )
         )
         return state
 
-    # 1. embedding запроса
-    query_vector = get_embeddings([state.get("query", "")], task="retrieval.query")[0]
+    formatted_chunks = []
+    for c in chunks_data:
+        text = c.get("chunk_text", "").strip()
+        page = c.get("page_number", "?")
+        if text:
+            formatted_chunks.append(f"[стр. {page}] {text}")
 
-    # 2. Поиск топ-N релевантных чанков в Qdrant
-    results = qdrant.query_points(
-        collection_name=QDRANT_COLLECTION,
-        query=query_vector,
-        query_filter=models.Filter(
-            must=[models.FieldCondition(
-                key="pdf_id",
-                match=models.MatchValue(value=current_article["pdf_id"])
-            )]
-        ),
-        search_params=models.SearchParams(hnsw_ef=128, exact=False),
-        limit=top_k
+    chunks_text = "\n\n".join(formatted_chunks)
+
+    article_info = (
+        f"Название статьи: {current_article.get('title') or 'неизвестно'}\n"
+        f"Авторы: {', '.join(current_article.get('authors', [])) or 'не указаны'}\n"
+        f"DOI: {current_article.get('doi') or 'не нашлось'}\n"
+        f"PDF: {current_article.get('pdf_name')}"
     )
 
-    chunks = [p.payload["document"] for p in results.result]
-
-    # 3. Формируем промпт для LLM
-    article_summary = (
-        f"Название статьи: {current_article.get('title')}\n"
-        f"Аннотация: {current_article.get('summary')}\n"
-        f"Авторы статьи: {current_article.get('authors')}\n"
-        f"Дата публикации статьи: {current_article.get('published')}\n"
-    )
-    chunks_text = "\n\n".join(chunks)
-    query_text = state.get("query", "")
-    prompt_text = (
-        f"Учитывай контекст при ответе на запрос пользователя:\n\n"
-        f"Извлеченные фрагменты статьи:\n{chunks_text}\n\n"
-        f"Общий контекст о статье:\n{article_summary}\n\n"
-        f"Запрос пользователя: {query_text}"
+    prompt = (
+        "Ты — исследовательский ассистент, анализирующий загруженный PDF.\n"
+        "Используй только предоставленные фрагменты для ответа.\n"
+        "Если цитируешь — указывай страницу в виде [стр. N].\n\n"
+        f"Информация о статье:\n{article_info}\n\n"
+        f"Фрагменты из PDF:\n{chunks_text}\n\n"
+        f"Вопрос пользователя:\n{query_text}"
     )
 
     client = OpenAI(
         api_key=os.environ.get("FIREWORKS_API_KEY"),
         base_url="https://api.fireworks.ai/inference/v1"
     )
+
+    model_name = f"accounts/fireworks/models/{runtime.context.model.split('/')[-1]}"
+
     try:
         response = client.chat.completions.create(
-            model=f"accounts/fireworks/models/{runtime.context.model.split('/')[-1]}",
+            model=model_name,
             messages=[
-                {"role": "system", "content": "Используй предоставленные данные о статье и контекст запроса для ответа."},
-                {"role": "user", "content": prompt_text}
+                {"role": "system", "content": "Отвечай строго по приведённым фрагментам PDF."},
+                {"role": "user", "content": prompt},
             ],
-            max_tokens=1500,
-            temperature=0.5
+            max_tokens=2000,
+            temperature=0.4,
         )
+
         answer = response.choices[0].message.content
+        logger.info(f"✅ analyze_node: ответ сгенерирован успешно для pdf_id={pdf_id}")
         state["messages"].append(AIMessage(content=answer))
-        logger.info("analyze_node: ответ от LLM добавлен в state")
-    except Exception:
-        logger.exception("analyze_node: ошибка вызова LLM")
-        state["messages"].append(AIMessage(content="Ошибка при генерации ответа."))
+
+    except Exception as e:
+        logger.exception(f"Ошибка вызова модели в analyze_node: {e}")
+        state["messages"].append(
+            AIMessage(content="Ошибка при генерации ответа на основе PDF")
+        )
 
     return state
 
@@ -430,7 +398,6 @@ async def arxiv_research(state: dict, runtime: Runtime[Context]):
         )
     )
     return state
-
 
 @traced
 async def summarize_sources(state: dict, runtime: Runtime[Context]):
@@ -505,10 +472,15 @@ def route_research(state: dict, max_loops: int = 2):
     else:
         return "finalize_summary"
 
-
 async def run_agent(user_input: str, state: dict, session_id: str):
+    if isinstance(user_input, str) and "exit_analysis" in user_input:
+        state["analysis_mode"] = False
+        state["current_article"] = None
+        state["intent"] = "qa"
+        logger.info(f"🔄 exit_analysis: анализ сброшен для session_id={session_id}")
+        return state
+
     ttl_config = TTLConfig(ttl_seconds=1000)
-    
     async with AsyncPostgresStore.from_conn_string(DB_URI, ttl=ttl_config) as store, \
                AsyncPostgresSaver.from_conn_string(DB_URI) as checkpointer:
 
@@ -520,7 +492,7 @@ async def run_agent(user_input: str, state: dict, session_id: str):
             context = Context(user_id=session_id)
             graph_builder = StateGraph(State, context_schema=Context)
 
-            # --- Узлы
+            # --- Узлы ---
             graph_builder.add_node(call_model)
             graph_builder.add_node(store_memory)
             graph_builder.add_node(analyze_node)
@@ -528,11 +500,11 @@ async def run_agent(user_input: str, state: dict, session_id: str):
             graph_builder.add_node(summarize_sources)
             graph_builder.add_node(finalize_summary)
 
-            # --- Ребра
+            # --- Ребра ---
             graph_builder.add_edge("__start__", "call_model")
             graph_builder.add_conditional_edges(
                 "call_model",
-                lambda state: "store_memory" if state.get("intent") != "qa" else END,
+                lambda s: "store_memory" if s.get("intent") != "qa" else END,
                 ["store_memory", END]
             )
             graph_builder.add_conditional_edges(
@@ -543,21 +515,25 @@ async def run_agent(user_input: str, state: dict, session_id: str):
             graph_builder.add_edge("arxiv_research", "summarize_sources")
             graph_builder.add_conditional_edges(
                 "summarize_sources",
-                lambda state: route_research(state),
+                lambda s: route_research(s),
                 ["arxiv_research", "finalize_summary"]
             )
             graph_builder.add_edge("finalize_summary", END)
-            graph_builder.add_edge("analyze_node", "call_model")
+            graph_builder.add_edge("analyze_node", END)
 
-            graph = graph_builder.compile(store=store, 
-                                          checkpointer=checkpointer, 
-                                          cache=InMemoryCache())
+            graph = graph_builder.compile(
+                store=store,
+                checkpointer=checkpointer,
+                cache=InMemoryCache()
+            )
             graph.name = "MVPAgent"
 
             initial_state = {
                 "messages": [HumanMessage(content=user_input)],
                 "query": user_input,
-                "current_article": state.get("current_article"), 
+                "current_article": state.get("current_article"),
+                "analysis_mode": state.get("analysis_mode", False),
+                "intent": "analyze" if state.get("analysis_mode") else state.get("intent", "qa"),
             }
 
             result = await graph.ainvoke(
@@ -574,4 +550,4 @@ async def run_agent(user_input: str, state: dict, session_id: str):
 
         finally:
             stopped = await store.stop_ttl_sweeper(timeout=5)
-            print(f"TTL sweeper stopped: {stopped}")
+            logger.info(f"TTL sweeper stopped: {stopped}")

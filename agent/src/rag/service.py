@@ -1,38 +1,45 @@
 import os
-from qdrant_client import QdrantClient, models
+import re
+
+from pinecone.grpc import PineconeGRPC as Pinecone
+from pinecone import ServerlessSpec
 from agent.src.rag.utils import get_embeddings
+from agent.src.utils import logger
 from dotenv import load_dotenv
 
 load_dotenv()
 
-QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-COLLECTION_NAME = os.getenv("COLLECTION_NAME")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+INDEX_NAME = re.sub(r'[^a-z0-9-]', '-', os.getenv("COLLECTION_NAME").lower()).strip('-')
+DIMENSIONS = int(os.getenv("VECTOR_DIMENSION"))
+class PdfRetrieval:
+    def __init__(self):
+        self.pc = Pinecone(api_key=PINECONE_API_KEY)
+        self.index = self.pc.Index(INDEX_NAME)
 
-qdrant = QdrantClient(url=QDRANT_ENDPOINT, api_key=QDRANT_API_KEY, timeout=60.0)
+    async def retrieve(self, query_text: str, pdf_id: str, top_k: int = 10):
+        if not pdf_id:
+            raise ValueError("pdf_id обязателен для поиска")
 
-async def retrieve_chunks(query_text: str, pdf_id: str, top_k: int = 10):
-    query_emb = await get_embeddings([query_text], task="retrieval.query")
-    query_vector = query_emb[0]
+        query_emb = await get_embeddings([query_text], task="retrieval.query")
+        query_vector = query_emb[0]
 
-    try:
-        results = qdrant.query_points(
-            collection_name=COLLECTION_NAME,
-            query=query_vector,
-            query_filter=models.Filter(
-                must=[models.FieldCondition(
-                    key="pdf_id",
-                    match=models.MatchValue(value=pdf_id)
-                )]
-            ),
-            limit=top_k,
-            with_payload=True,
-            with_vectors=False
-        )
-    except Exception as e:
-        raise RuntimeError(f"Ошибка при поиске в Qdrant: {e}")
+        try:
+            results = self.index.query(
+                vector=query_vector,
+                top_k=top_k,
+                include_metadata=True,
+                filter={"pdf_id": {"$eq": pdf_id}},
+            )
 
-    if not results or not results.points:
-        return []
+        except Exception as e:
+            logger.error(f"Ошибка поиска в Pinecone: {e}")
+            return []
 
-    return [p.payload for p in results.points]
+        if not results or not getattr(results, "matches", []):
+            return []
+
+        matches = results.matches
+        logger.info(f"🔎 Найдено {len(matches)} фрагментов для pdf_id={pdf_id}")
+
+        return [m.metadata for m in matches]

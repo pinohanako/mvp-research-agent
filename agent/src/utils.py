@@ -4,7 +4,6 @@ import os
 import re
 import spacy
 from spacypdfreader.spacypdfreader import pdf_reader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def extract_first_page_text(pdf_path: str, nlp=None) -> str:
     if nlp is None:

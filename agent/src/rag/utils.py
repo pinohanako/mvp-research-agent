@@ -3,6 +3,7 @@ import re
 import aiohttp
 import spacy
 import tiktoken
+import itertools
 
 from semchunk import chunkerify
 from spacypdfreader.spacypdfreader import pdf_reader
@@ -27,13 +28,35 @@ async def get_embeddings(texts, task="retrieval.passage"):
         "input": texts
     }
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
         async with session.post(JINA_URL, headers=headers, json=payload) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 raise RuntimeError(f"Jina API error {resp.status}: {text}")
             data = await resp.json()
             return [d["embedding"] for d in data["data"]]
+        
+BATCH_SIZE = 250  
+
+def batch_iterable(iterable, batch_size=BATCH_SIZE):
+    it = iter(iterable)
+    chunk = tuple(itertools.islice(it, batch_size))
+    while chunk:
+        yield chunk
+        chunk = tuple(itertools.islice(it, batch_size))
+
+def normalize_metadata(metadata: dict) -> dict:
+    clean = {}
+    for k, v in metadata.items():
+        if v is None:
+            continue
+        if isinstance(v, (str, int, float, bool)):
+            clean[k] = v if not isinstance(v, str) else v[:2000]
+        elif isinstance(v, list) and all(isinstance(x, str) for x in v):
+            clean[k] = v
+        else:
+            clean[k] = str(v)
+    return clean
 
 nlp = spacy.load("xx_sent_ud_sm")
 class CustomChunker:
@@ -42,10 +65,10 @@ class CustomChunker:
         self.chunk_overlap = chunk_overlap
         self.min_chunk_length = min_chunk_length
         self.nlp = nlp
-        tokenizer = tiktoken.get_encoding("cl100k_base")
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
         self.chunker = chunkerify(
-            tokenizer_or_token_counter=tokenizer,
+            tokenizer_or_token_counter=self.tokenizer,
             chunk_size=self.chunk_size,
             memoize=True,
             cache_maxsize=2048,

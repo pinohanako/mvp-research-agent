@@ -57,6 +57,8 @@ class State(OverallState):
     url_sources: Annotated[List[str], add] = field(default_factory=list)
     research_loop_count: int = 0
     running_summary: Optional[str] = None
+    pdf_id: Optional[str] = None
+    retrieved_chunks: list = field(default_factory=list)
 
 __all__ = [
     "State",
