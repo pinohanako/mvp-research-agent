@@ -1,62 +1,83 @@
 import os
+import asyncio
 import pytest
 import numpy as np
-from qdrant_client import models
-from agent.src.utils import logger
+import logging
+from time import sleep
+
 from agent.src.rag.utils import CustomChunker, get_embeddings
 from agent.src.rag.build import process_pdf
-from .conftest import qdrant_client, test_pdf
+from agent.src.rag.service import PdfRetrieval
+from .conftest import pinecone_index, test_pdf
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
-async def test_full_rag_pipeline(qdrant_client, test_pdf):
+async def test_full_rag_pipeline(pinecone_index, test_pdf):
+    """
+    - разбиение PDF на чанки
+    - генерация эмбеддингов
+    - загрузку векторов
+    - поиск релевантных фрагментов
+    """
     pdf_path = test_pdf["pdf_path"]
     pdf_id = test_pdf["pdf_id"]
     pdf_name = test_pdf["pdf_name"]
 
-    logger.info("--- Проверка чанков ---")
+    logger.info("--- Проверка чанков PDF ---")
     chunker = CustomChunker(chunk_size=900, chunk_overlap=200)
     chunks = chunker.split_text(pdf_path)
-    assert chunks, "Не удалось получить чанки"
+    assert chunks, "Не удалось получить чанки из PDF"
     logger.info(f"Получено {len(chunks)} чанков")
 
-    logger.info("--- Проверка eмбеддингов ---")
+    logger.info("--- Проверка получения эмбеддингов ---")
     texts = [c["chunk_text"] for c in chunks[:5]]
     embs = await get_embeddings(texts)
     assert len(embs) == len(texts), "Количество эмбеддингов не совпадает"
-    logger.info(f"Эмбеддинги получены. Размерность: {len(embs[0])}")
+    logger.info(f"Эмбеддинги получены, размерность: {len(embs[0])}")
 
-    logger.info("--- Проверка process_pdf ---")
-    result = await process_pdf(pdf_path, pdf_name=pdf_name, pdf_id=pdf_id, batch_size=20)
-    assert result["num_chunks"] > 0, "Индексирование не выполнено"
-    logger.info(f"Индексировано {result['num_chunks']} чанков в Qdrant")
+    logger.info("--- Проверка process_pdf и загрузки в Pinecone ---")
+    result = await process_pdf(pdf_path, pdf_name=pdf_name, pdf_id=pdf_id)
+    assert result["num_chunks"] > 0, "Индексация не выполнена"
+    logger.info(f"Загружено {result['num_chunks']} чанков в Pinecone")
 
-    logger.info("--- Проверка поиска ---")
+    logger.info("Ожидание синхронизации с Pinecone...")
+    await asyncio.sleep(5)
+
+    logger.info("--- Проверка поиска в Pinecone ---")
+    retriever = PdfRetrieval()
     query = "Какие бывают типы переломов костей?"
-    query_emb = await get_embeddings([query], task="retrieval.query")
-    query_vector = query_emb[0]
 
-    results = qdrant_client.query_points(
-        collection_name=os.getenv("COLLECTION_NAME"),
-        query=query_vector,
-        query_filter=models.Filter(
-            must=[models.FieldCondition(
-                key="pdf_id",
-                match=models.MatchValue(value=pdf_id)
-            )]
-        ),
-        limit=5,
-        with_payload=True
-    )
-    assert results.points, "Результаты поиска пустые"
-    logger.info(f"Найдено {len(results.points)} совпадений в Qdrant")
+    matches = []
+    for attempt in range(3):
+        matches = await retriever.retrieve(query_text=query, pdf_id=pdf_id, top_k=5)
+        if matches:
+            logger.info(f"Найдено {len(matches)} релевантных фрагментов (попытка {attempt+1})")
+            break
+        else:
+            logger.warning(f"Результаты пустые, повтор через 3 секунды (попытка {attempt+1}/3)")
+            await asyncio.sleep(3)
 
-    for p in results.points[:3]:
-        page = p.payload.get("page_number", "?")
-        snippet = p.payload.get("chunk_text", "")[:120].replace("\n", " ")
-        logger.debug(f"[стр. {page}] {snippet}")
+    assert matches, "Результаты поиска остались пустыми после 3 попыток"
 
-    logger.info("--- Проверка статистики эмбеддингов ---")
-    arr = np.stack([np.array(c["vector"]) for c in result["chunks"]])
+    for i, m in enumerate(matches[:3]):
+        snippet = m.get("chunk_text", "")[:120].replace("\n", " ")
+        page = m.get("page_number", "?")
+        logger.info(f"[{i+1}] страница {page}: {snippet}")
+
+    logger.info("--- Проверка статистики векторов ---")
+    arr = np.stack([np.array(v[1]) for v in result["chunks"]])
     norms = np.linalg.norm(arr, axis=1)
-    assert not np.isnan(arr).any(), "В эмбеддингах найдены NaN"
-    logger.info("--- Полный тест RAG-пайплайна завершён успешно ---")
+    assert not np.isnan(arr).any(), "Найдены NaN в эмбеддингах"
+    assert (norms > 0).all(), "Найдены нулевые векторы"
+    logger.info("Эмбеддинги корректны, пайплайн работает стабильно")
+
+    logger.info("--- Полный тест RAG-пайплайна для Pinecone завершён успешно ---")
+
+
