@@ -15,6 +15,8 @@ SYSTEM_PROMPT = """Ты научный ассистент.
 {user_info}
 
 Системное время: {time}"""
+
+
 class Intent(BaseModel):
     intent: Literal["search", "qa"] = Field(
         description=(
@@ -25,14 +27,16 @@ class Intent(BaseModel):
         )
     )
 
+
 class PdfContextDecision(BaseModel):
     continue_pdf: Literal["true", "false"] = Field(
         description=(
-            "Булевое значение строгой, означающее, желает ли пользователь продолжать диалог о загруженной статье. "
+            "Булевое значение, означающее, желает ли пользователь продолжать диалог о загруженной статье. "
             "true — пользователь продолжает диалог о загруженной статье,"
             "false — пользователь в явном виде не намерен больше продолжать диалог о загруженной статье, или желает осуществить поиск, включая приветствия, прощания"
         )
     )
+
 
 class Filter(BaseModel):
     title: Union[str, None] = Field(
@@ -47,6 +51,8 @@ class Filter(BaseModel):
         description="Строка DOI - если указано",
         default=None
     )
+
+    
 class ArticleInfo(BaseModel):
     title: Union[str, None] = Field(..., description="Название статьи")
     summary: Union[str, None] = Field(None, description="Аннотация статьи")
