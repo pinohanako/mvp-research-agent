@@ -29,7 +29,7 @@
 - `messages` — список сообщений AnyMessage. Хранит историю диалога
 - `query` — текущая строка запроса пользователя
 - `intent` — распознанное текущее намерение: `"qa"` | `"search"` | `"analyze"`
-- `current_article` — ArticleState (`title`, `summary`, `authors`, `published`, `pdf_id`, `pdf_name`, `doi`, `key_words`).
+- `current_article` — ArticleState (`title`, `summary`, `authors`, `published`, `pdf_id`, `doi`, `key_words`).
 - `raw_results` — временный контейнер для результатов поиска (тексты)
 - `url_sources` — набор URL найденных источников
 - `research_loop_count` — счётчик итераций поиска/агрегации
