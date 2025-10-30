@@ -22,6 +22,7 @@ import os
 import asyncio
 import aiohttp
 import feedparser
+import json
 from datetime import datetime
 from typing import cast
 from collections import defaultdict
@@ -209,8 +210,12 @@ async def call_model(state: dict, runtime: Runtime[Context]) -> dict:
             max_tokens=4000,
             temperature=0.5,
         )
-        reply_content = qa_response.choices[0].message.content
-        state["messages"].append(AIMessage(content=reply_content))
+
+        message_dict = qa_response.choices[0].message
+        logger.info("RAW MODEL MESSAGE:\n%s", json.dumps(message_dict, indent=2, ensure_ascii=False))
+
+        state["messages"].append(AIMessage(**message_dict))
+
     except Exception as e:
         logger.exception("QA call failed: %s", e)
         state["messages"].append(AIMessage(content="Произошла ошибка при обработке запроса."))
@@ -342,7 +347,7 @@ async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 8):
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "Отвечай строго по приведённым фрагментам PDF."},
+                {"role": "system", "content": "Отвечай строго по приведённым фрагментам PDF"},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=2000,
@@ -350,7 +355,7 @@ async def analyze_node(state: dict, runtime: Runtime[Context], top_k: int = 8):
         )
 
         answer = response.choices[0].message.content
-        logger.info(f"✅ analyze_node: ответ сгенерирован успешно для pdf_id={pdf_id}")
+        logger.info(f"analyze_node: ответ сгенерирован успешно для pdf_id={pdf_id}")
         state["messages"].append(AIMessage(content=answer))
 
     except Exception as e:
